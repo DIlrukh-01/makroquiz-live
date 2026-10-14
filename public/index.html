@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1d5bbf">
+  <title>Макроквиз</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/student.css">
+</head>
+<body>
+  <div id="conn" class="banner" hidden>Нет связи. Переподключаемся…</div>
+  <div id="toast" class="toast" hidden></div>
+
+  <main>
+    <!-- Вход -->
+    <section id="s-join" class="screen">
+      <h1>Макроквиз</h1>
+      <form id="join-form" class="card" autocomplete="off">
+        <label for="name">Фамилия и имя</label>
+        <input id="name" type="text" maxlength="60" placeholder="Иванова Мария" autocapitalize="words" spellcheck="false" enterkeyhint="go">
+        <p id="join-error" class="bad" role="alert"></p>
+        <button id="join-btn" class="primary big" type="submit">Войти</button>
+      </form>
+      <p class="muted small">Регистрация не нужна. Пишите настоящие фамилию и имя: по ним преподаватель увидит результат.</p>
+    </section>
+
+    <!-- Ожидание старта -->
+    <section id="s-wait" class="screen center" hidden>
+      <p class="muted">Вы в игре</p>
+      <h2 class="who"></h2>
+      <p class="big-text">Ждём начала…</p>
+      <p class="muted">Смотрите на экран преподавателя.</p>
+      <button id="change-name" class="link" type="button">Это не я — сменить имя</button>
+    </section>
+
+    <!-- Вопрос -->
+    <section id="s-question" class="screen" hidden>
+      <div class="qbar">
+        <span id="q-num"></span>
+        <span id="q-timer" class="timer"></span>
+      </div>
+      <p id="q-text" class="q-text"></p>
+      <div id="q-options" class="options"></div>
+      <p id="q-status" class="center muted"></p>
+    </section>
+
+    <!-- Ответ принят -->
+    <section id="s-answered" class="screen center" hidden>
+      <div class="qbar">
+        <span id="a-num"></span>
+        <span id="a-timer" class="timer"></span>
+      </div>
+      <div id="a-choice" class="chosen"></div>
+      <p class="big-text">Ответ принят</p>
+      <p class="muted">Ждём остальных…</p>
+    </section>
+
+    <!-- Итог вопроса -->
+    <section id="s-result" class="screen center" hidden>
+      <div id="r-verdict" class="verdict"></div>
+      <p id="r-points" class="big-text"></p>
+      <div class="card left">
+        <p class="muted small">Верный ответ</p>
+        <p id="r-correct" class="strong"></p>
+        <p id="r-expl" class="small"></p>
+      </div>
+      <p id="r-score" class="score"></p>
+      <p class="muted">Ждём следующий вопрос…</p>
+    </section>
+
+    <!-- Конец игры -->
+    <section id="s-final" class="screen center" hidden>
+      <h1>Игра окончена</h1>
+      <p class="muted who"></p>
+      <div class="card">
+        <p class="muted">Ваше место</p>
+        <p id="f-rank" class="huge"></p>
+        <p id="f-score" class="big-text"></p>
+        <p id="f-correct" class="muted"></p>
+      </div>
+      <p class="muted">Спасибо за игру!</p>
+    </section>
+
+    <!-- Сообщение -->
+    <section id="s-message" class="screen center" hidden>
+      <p id="m-text" class="big-text"></p>
+      <button id="m-btn" class="primary big" type="button"></button>
+    </section>
+  </main>
+
+  <script src="/student.js"></script>
+</body>
+</html>

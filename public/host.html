@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Макроквиз — ведущий</title>
+  <script>
+    try { var t = localStorage.getItem('mq_theme'); if (t) document.documentElement.setAttribute('data-theme', t); } catch (e) {}
+  </script>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/host.css">
+</head>
+<body>
+  <div id="conn" class="banner" hidden>Нет связи с сервером. Переподключаемся…</div>
+  <div id="replaced" class="banner" hidden>
+    Управление открыто в другом окне.
+    <button id="take-back" type="button">Вернуть управление сюда</button>
+  </div>
+
+  <header class="top">
+    <div class="brand">Макроквиз <span class="muted">Live</span></div>
+    <div id="top-info" class="top-info"></div>
+    <div class="top-actions">
+      <button id="theme" type="button" title="Сменить тему">Тема</button>
+    </div>
+  </header>
+
+  <!-- Вход по PIN -->
+  <section id="v-pin" class="view pin-view">
+    <form id="pin-form" class="card pin-card">
+      <h1>Экран ведущего</h1>
+      <label for="pin">PIN-код</label>
+      <input id="pin" type="password" inputmode="numeric" autocomplete="current-password" autofocus>
+      <p id="pin-error" class="bad" role="alert"></p>
+      <button class="primary" type="submit">Войти</button>
+    </form>
+  </section>
+
+  <!-- Лобби -->
+  <section id="v-lobby" class="view" hidden>
+    <div class="lobby">
+      <div class="join-box">
+        <p class="join-label">Сканируйте QR-код или откройте</p>
+        <p id="short-url" class="short-url"></p>
+        <div id="qr" class="qr"></div>
+      </div>
+      <div class="lobby-side">
+        <div class="count-line"><span id="count" class="count">0</span> <span id="count-word">участников</span></div>
+        <ul id="names" class="names"></ul>
+        <div class="settings card">
+          <div class="setting">
+            <span>Время на вопрос</span>
+            <div class="seg" id="set-seconds">
+              <button type="button" data-v="15">15 с</button>
+              <button type="button" data-v="20">20 с</button>
+              <button type="button" data-v="30">30 с</button>
+            </div>
+          </div>
+          <div class="setting">
+            <span>Вопросов</span>
+            <div class="seg" id="set-count">
+              <button type="button" data-v="8">8</button>
+              <button type="button" data-v="12">12</button>
+              <button type="button" data-v="0">все</button>
+            </div>
+          </div>
+          <p id="q-info" class="muted small"></p>
+        </div>
+        <p id="lobby-warn" class="warn small" hidden></p>
+        <button id="start" class="primary huge-btn" type="button">Начать <kbd>Пробел</kbd></button>
+        <p class="muted small">После игры сразу скачайте результаты: бесплатный сервер может стереть файлы при перезапуске.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Вопрос и итог вопроса -->
+  <section id="v-question" class="view" hidden>
+    <div class="q-head">
+      <span id="q-num" class="q-num"></span>
+      <span id="q-answered" class="q-answered"></span>
+      <span id="q-timer" class="q-timer"></span>
+    </div>
+    <h2 id="q-text" class="q-text"></h2>
+    <div id="q-options" class="h-options"></div>
+
+    <div id="reveal" class="reveal" hidden>
+      <div class="card">
+        <p id="r-expl" class="expl"></p>
+      </div>
+      <div class="card">
+        <h3>Топ-5</h3>
+        <ol id="r-top" class="top5"></ol>
+      </div>
+    </div>
+
+    <div class="controls">
+      <button id="skip" type="button">Пропустить таймер <kbd>Пробел</kbd></button>
+      <button id="next" class="primary" type="button" hidden>Дальше <kbd>Пробел</kbd></button>
+      <button id="end" class="danger" type="button">Завершить игру</button>
+    </div>
+  </section>
+
+  <!-- Итоги -->
+  <section id="v-final" class="view" hidden>
+    <div class="final-head">
+      <h2>Итоги игры</h2>
+      <div class="final-actions">
+        <button id="download" class="primary" type="button">Скачать результаты</button>
+        <button id="reset" type="button">Новая игра</button>
+      </div>
+    </div>
+    <p class="warn">Скачайте результаты сейчас: бесплатный сервер может стереть сохранённый файл при перезапуске.</p>
+    <p id="saved" class="muted small"></p>
+    <table class="ranking">
+      <thead><tr><th>Место</th><th>Фамилия и имя</th><th>Баллы</th><th>Верных</th></tr></thead>
+      <tbody id="rank-body"></tbody>
+    </table>
+  </section>
+
+  <script src="/host.js"></script>
+</body>
+</html>
