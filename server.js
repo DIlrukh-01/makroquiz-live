@@ -25,6 +25,7 @@ const MAX_PLAYERS = 300;
 const GRACE_MS = 300; // запас на задержку сети; такой ответ засчитывается как данный в последнюю секунду
 const ALLOWED_SECONDS = [15, 20, 30];
 const ALLOWED_COUNTS = [8, 12, 0]; // 0 = все вопросы из файла
+const PROBE_MS = 2000; // сколько ждать ответа от старого подключения при повторном входе
 const PIN_MAX_FAILS = 8;
 const PIN_LOCK_MS = 60 * 1000;
 
@@ -518,25 +519,57 @@ function handleJoin(ws, msg) {
   const err = nameError(name);
   if (err) return send(ws, { t: 'joinError', msg: err });
   const key = nameKey(name);
-  let p = players.get(key);
-  if (p) {
-    const tokenOk = typeof msg.token === 'string' && msg.token === p.token;
-    if (p.connected && p.ws !== ws && !tokenOk) {
+  const p = players.get(key);
+  if (!p) {
+    if (game.phase === 'finished') return send(ws, { t: 'joinError', msg: 'Игра уже закончилась.' });
+    if (players.size >= MAX_PLAYERS) return send(ws, { t: 'joinError', msg: 'В игре уже слишком много участников.' });
+    return attachPlayer(ws, newPlayer(name, key));
+  }
+  const tokenOk = typeof msg.token === 'string' && msg.token === p.token;
+  if (!p.connected || p.ws === ws || tokenOk) return attachPlayer(ws, p);
+  // Имя занято «живым» подключением. Но обрыв связи сервер может заметить с опозданием,
+  // поэтому проверяем старое подключение: если оно не отвечает, возвращаем студента в игру.
+  const old = p.ws;
+  probeAlive(old, (alive) => {
+    if (ws.readyState !== 1) return;
+    if (alive && p.ws === old && players.get(key) === p) {
       return send(ws, {
         t: 'joinError',
         msg: 'Такое имя уже есть в игре. Добавьте инициал, например: «Иванов Иван П.»',
       });
     }
-    if (p.ws && p.ws !== ws) {
-      const old = p.ws;
-      old.player = null;
-      send(old, { t: 'replaced' });
-      old.close();
-    }
-  } else {
-    if (game.phase === 'finished') return send(ws, { t: 'joinError', msg: 'Игра уже закончилась.' });
-    if (players.size >= MAX_PLAYERS) return send(ws, { t: 'joinError', msg: 'В игре уже слишком много участников.' });
-    p = newPlayer(name, key);
+    if (players.get(key) !== p) return handleJoin(ws, msg);
+    attachPlayer(ws, p);
+  });
+}
+
+function probeAlive(ws, cb) {
+  if (!ws || ws.readyState !== 1) return cb(false);
+  let done = false;
+  const finish = (alive) => {
+    if (done) return;
+    done = true;
+    clearTimeout(timer);
+    ws.removeListener('pong', onPong);
+    cb(alive);
+  };
+  const onPong = () => finish(true);
+  const timer = setTimeout(() => finish(false), PROBE_MS);
+  ws.on('pong', onPong);
+  try {
+    ws.ping();
+  } catch (e) {
+    finish(false);
+  }
+}
+
+function attachPlayer(ws, p) {
+  if (p.ws && p.ws !== ws) {
+    const old = p.ws;
+    old.player = null;
+    send(old, { t: 'replaced' });
+    old.close();
+    setTimeout(() => old.terminate(), 1000);
   }
   if (ws.player && ws.player !== p && ws.player.ws === ws) {
     ws.player.connected = false;

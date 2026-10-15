@@ -170,13 +170,20 @@ async function main() {
       if (s === lateStudent && !lateChecked) return; // этот студент ответит после таймера
       await s.client.wait((m) => m.t === 'state' && m.phase === 'question' && m.index === q, 30000, 0);
       if (dropped.includes(s) && q === 3 && !reconnectChecked) {
-        // Обрыв связи: закрываем соединение и входим заново по одному имени, без токена.
-        await new Promise((r) => { s.client.ws.once('close', r); s.client.close(); });
-        await sleep(rand(300, 800));
+        // Обрыв связи и вход заново по одному имени, без токена.
+        // Чётные студенты закрывают вкладку, нечётные пропадают молча (сервер об этом не знает).
+        if (dropped.indexOf(s) % 2 === 0) {
+          await new Promise((r) => { s.client.ws.once('close', r); s.client.close(); });
+          await sleep(rand(300, 800));
+        } else {
+          s.client.ws._socket.pause();
+          s.frozen = s.client;
+          await sleep(rand(300, 800));
+        }
         s.client = new Client(s.name);
         await s.client.open();
         s.client.send({ t: 'join', name: s.name });
-        const back = await s.client.wait((m) => m.t === 'state');
+        const back = await s.client.wait((m) => m.t === 'state' || m.t === 'joinError');
         s.reconnectOk = back.phase === 'question' && back.index === q;
         s.scoreBack = true;
       }
@@ -260,7 +267,7 @@ async function main() {
   console.log(`Время подтверждения ответа: медиана ${p(0.5)} мс, 95% ответов быстрее ${p(0.95)} мс, максимум ${latencies[latencies.length - 1]} мс`);
 
   // Убираем тестовых студентов и возвращаем сервер в лобби, чтобы не мешать настоящей игре.
-  students.forEach((s) => s.client.close());
+  students.forEach((s) => { s.client.close(); if (s.frozen) s.frozen.ws.terminate(); });
   await sleep(1500);
   H.send({ t: 'reset' });
   await sleep(300);
