@@ -186,6 +186,9 @@
 
   function handle(msg) {
     switch (msg.t) {
+      case 'hb': // сервер проверяет, что страница на связи
+        if (ws && ws.readyState === 1) ws.send('{"t":"hb"}');
+        break;
       case 'welcome':
         name = msg.name;
         token = msg.token;

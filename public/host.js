@@ -296,6 +296,9 @@
 
   function handle(m) {
     switch (m.t) {
+      case 'hb': // сервер проверяет, что страница на связи
+        if (ws && ws.readyState === 1) ws.send('{"t":"hb"}');
+        break;
       case 'authOk':
         authed = true;
         try { sessionStorage.setItem('mq_pin', pin); } catch (e) {}

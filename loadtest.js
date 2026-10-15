@@ -44,6 +44,7 @@ class Client {
       this.ws.on('close', () => { this.closed = true; });
       this.ws.on('message', (d) => {
         const m = JSON.parse(d);
+        if (m.t === 'hb') return this.send({ t: 'hb' }); // как настоящая страница
         m._at = Date.now();
         this.msgs.push(m);
         this.waiters = this.waiters.filter((w) => {

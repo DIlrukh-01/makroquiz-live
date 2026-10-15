@@ -26,6 +26,7 @@ const GRACE_MS = 300; // запас на задержку сети; такой �
 const ALLOWED_SECONDS = [15, 20, 30];
 const ALLOWED_COUNTS = [8, 12, 0]; // 0 = все вопросы из файла
 const PROBE_MS = 2000; // сколько ждать ответа от старого подключения при повторном входе
+const HEARTBEAT_MS = 15000; // как часто проверять, что страницы на связи
 const PIN_MAX_FAILS = 8;
 const PIN_LOCK_MS = 60 * 1000;
 
@@ -543,6 +544,9 @@ function handleJoin(ws, msg) {
   });
 }
 
+// Проверяет, открыта ли ещё страница на том конце. Служебный ping не годится:
+// на Render на него отвечает промежуточный узел, даже если телефон уже отключился.
+// Поэтому шлём сообщение самой странице и ждём от неё любого ответа.
 function probeAlive(ws, cb) {
   if (!ws || ws.readyState !== 1) return cb(false);
   let done = false;
@@ -550,17 +554,13 @@ function probeAlive(ws, cb) {
     if (done) return;
     done = true;
     clearTimeout(timer);
-    ws.removeListener('pong', onPong);
+    ws.removeListener('message', onMessage);
     cb(alive);
   };
-  const onPong = () => finish(true);
+  const onMessage = () => finish(true);
   const timer = setTimeout(() => finish(false), PROBE_MS);
-  ws.on('pong', onPong);
-  try {
-    ws.ping();
-  } catch (e) {
-    finish(false);
-  }
+  ws.on('message', onMessage);
+  send(ws, { t: 'hb' });
 }
 
 function attachPlayer(ws, p) {
@@ -686,10 +686,8 @@ wss.on('connection', (ws, req) => {
   ws.isAlive = true;
   ws.player = null;
   ws.isHost = false;
-  ws.on('pong', () => {
-    ws.isAlive = true;
-  });
   ws.on('message', (data) => {
+    ws.isAlive = true;
     let msg;
     try {
       msg = JSON.parse(data);
@@ -703,6 +701,7 @@ wss.on('connection', (ws, req) => {
       return;
     }
     if (msg.t === 'hostAuth') return handleHostAuth(ws, msg);
+    if (msg.t === 'hb') return; // ответ страницы на проверку связи
     if (msg.t === 'ping') return send(ws, { t: 'pong' });
     if (ws.isHost || ws === hostWs) return handleHostCommand(ws, msg);
     send(ws, { t: 'hostReplaced' });
@@ -719,7 +718,8 @@ wss.on('connection', (ws, req) => {
   ws.on('error', () => {});
 });
 
-// Проверка «живых» соединений: оборванные закрываем, чтобы сразу показать студента как отключённого.
+// Проверка «живых» соединений: страница должна ответить на сообщение hb до следующей проверки.
+// Молчащие соединения закрываем, чтобы ведущий видел студента как отключённого.
 setInterval(() => {
   for (const ws of wss.clients) {
     if (!ws.isAlive) {
@@ -727,11 +727,9 @@ setInterval(() => {
       continue;
     }
     ws.isAlive = false;
-    try {
-      ws.ping();
-    } catch (e) {}
+    send(ws, { t: 'hb' });
   }
-}, 25000);
+}, HEARTBEAT_MS);
 
 server.listen(PORT, () => {
   console.log(`Макроквиз Live запущен: http://localhost:${PORT}`);
