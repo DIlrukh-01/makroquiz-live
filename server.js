@@ -15,8 +15,11 @@ const QRCode = require('qrcode');
 // ---------- Настройки ----------
 
 const PORT = Number(process.env.PORT) || 3000;
-const HOST_PIN = String(process.env.HOST_PIN || '1234').trim();
-const PIN_IS_DEFAULT = !process.env.HOST_PIN;
+// Название переменной ищем без учёта регистра и лишних пробелов: так проще вписать его в панели хостинга.
+const PIN_ENV_KEY = Object.keys(process.env).find((k) => k.trim().toUpperCase() === 'HOST_PIN');
+const PIN_FROM_ENV = PIN_ENV_KEY ? String(process.env[PIN_ENV_KEY]).trim() : '';
+const HOST_PIN = PIN_FROM_ENV || '1234';
+const PIN_IS_DEFAULT = !PIN_FROM_ENV;
 const QUESTIONS_FILE = process.env.QUESTIONS_FILE || path.join(__dirname, 'questions.txt');
 const RESULTS_DIR = process.env.RESULTS_DIR || path.join(__dirname, 'results');
 const PUBLIC_URL = (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/+$/, '');
@@ -734,7 +737,9 @@ setInterval(() => {
 server.listen(PORT, () => {
   console.log(`Макроквиз Live запущен: http://localhost:${PORT}`);
   console.log(`Экран ведущего: http://localhost:${PORT}/host`);
-  if (PIN_IS_DEFAULT) console.log('PIN ведущего не задан, используется 1234. Задайте переменную HOST_PIN.');
+  if (PIN_FROM_ENV) console.log(`PIN ведущего задан (переменная ${JSON.stringify(PIN_ENV_KEY)}, символов: ${PIN_FROM_ENV.length}).`);
+  else if (PIN_ENV_KEY) console.log(`Переменная ${JSON.stringify(PIN_ENV_KEY)} найдена, но пустая. Используется PIN 1234.`);
+  else console.log('PIN ведущего не задан, используется 1234. Задайте переменную HOST_PIN.');
   const qi = game.qInfo;
   if (qi.error) console.log(qi.error);
   else console.log(`Вопросов в файле: ${qi.list.length}` + (qi.badLines.length ? `, строки с ошибками: ${qi.badLines.join(', ')}` : ''));
