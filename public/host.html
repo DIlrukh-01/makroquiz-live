@@ -64,6 +64,15 @@
               <button type="button" data-v="0">все</button>
             </div>
           </div>
+          <div class="setting">
+            <span>Следующий вопрос</span>
+            <div class="seg" id="set-auto">
+              <button type="button" data-v="0">вручную</button>
+              <button type="button" data-v="10">через 10 с</button>
+              <button type="button" data-v="15">15 с</button>
+              <button type="button" data-v="20">20 с</button>
+            </div>
+          </div>
           <p id="q-info" class="muted small"></p>
         </div>
         <p id="lobby-warn" class="warn small" hidden></p>
@@ -94,6 +103,8 @@
     </div>
 
     <div class="controls">
+      <span id="auto-info" class="auto-info" hidden></span>
+      <button id="pause" type="button" hidden>Пауза</button>
       <button id="skip" type="button">Пропустить таймер <kbd>Пробел</kbd></button>
       <button id="next" class="primary" type="button" hidden>Дальше <kbd>Пробел</kbd></button>
       <button id="end" class="danger" type="button">Завершить игру</button>

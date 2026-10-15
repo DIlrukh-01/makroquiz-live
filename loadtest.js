@@ -101,7 +101,7 @@ async function main() {
     host.send({ t: 'reset' });
     hs = await host.wait((m) => m.t === 'host' && m.phase === 'lobby');
   }
-  host.send({ t: 'settings', seconds: 15, count: 12 });
+  host.send({ t: 'settings', seconds: 15, count: 12, auto: 0 });
 
   // 2. Студенты входят.
   const students = [];
@@ -238,6 +238,25 @@ async function main() {
       H.send({ t: 'next' });
       break;
     }
+    if (q === 1) {
+      // Автопереход: включаем 10 с, ставим на паузу, снимаем паузу и ждём, что вопрос начнётся сам.
+      let m0 = H.mark();
+      H.send({ t: 'settings', auto: 10 });
+      const on = await H.wait((m) => m.t === 'host' && m.phase === 'reveal' && m.reveal.autoMs > 0, 5000, m0).catch(() => null);
+      m0 = H.mark();
+      H.send({ t: 'pause' });
+      const paused = await H.wait((m) => m.t === 'host' && m.reveal && m.reveal.autoPaused, 5000, m0).catch(() => null);
+      await sleep(1500);
+      check(on && paused && H.msgs.slice(m0).every((m) => m.t !== 'host' || m.phase === 'reveal'), 'Автопереход ставится на паузу');
+      m0 = H.mark();
+      const t = Date.now();
+      H.send({ t: 'pause' });
+      const nq = await H.wait((m) => m.t === 'host' && m.phase === 'question' && m.question.index === q + 1, 20000, m0).catch(() => null);
+      const dt = (Date.now() - t) / 1000;
+      check(nq && dt > 9 && dt < 13, `Автопереход: следующий вопрос начался сам через ${dt.toFixed(1)} с`);
+      H.send({ t: 'settings', auto: 0 });
+      continue;
+    }
     H.send({ t: 'next' });
   }
 
@@ -272,7 +291,7 @@ async function main() {
   await sleep(1500);
   H.send({ t: 'reset' });
   await sleep(300);
-  H.send({ t: 'settings', seconds: 20, count: 12 });
+  H.send({ t: 'settings', seconds: 20, count: 12, auto: 15 });
   await sleep(300);
   H.close();
   finish(t0);

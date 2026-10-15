@@ -156,6 +156,19 @@
       $('r-correct').textContent = LETTERS[st.correct] + '. ' + st.options[st.correct];
       $('r-expl').textContent = st.explanation || '';
       $('r-score').textContent = 'Всего: ' + st.score + ' баллов · место ' + st.rank + ' из ' + st.players;
+      var isLast = st.index + 1 >= st.total;
+      if (typeof st.nextInMs === 'number') {
+        // Отсчёт до автоперехода (идёт тем же таймером, что и вопрос)
+        timerEnd = Date.now() + st.nextInMs;
+        var upd = function () {
+          var left = Math.max(0, Math.ceil((timerEnd - Date.now()) / 1000));
+          $('r-next').textContent = (isLast ? 'Итоги игры через ' : 'Следующий вопрос через ') + left + ' с';
+        };
+        upd();
+        timerId = setInterval(upd, 250);
+      } else {
+        $('r-next').textContent = isLast ? 'Ждём итоги игры…' : 'Ждём следующий вопрос…';
+      }
       show('s-result');
       return;
     }

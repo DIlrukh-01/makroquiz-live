@@ -63,6 +63,40 @@
   // ---------- Таймер ----------
 
   function stopTimer() { clearInterval(timerId); timerId = null; }
+
+  // ---------- Автопереход ----------
+
+  var autoId = null;
+  function stopAuto() {
+    clearInterval(autoId);
+    autoId = null;
+    $('auto-info').hidden = true;
+    $('pause').hidden = true;
+  }
+  function showAuto(r) {
+    clearInterval(autoId);
+    autoId = null;
+    var info = $('auto-info');
+    var btn = $('pause');
+    if (r.autoPaused) {
+      info.textContent = 'Автопереход на паузе';
+      btn.textContent = 'Продолжить';
+    } else if (r.autoMs !== null) {
+      var end = Date.now() + r.autoMs;
+      var what = r.isLast ? 'Итоги игры через ' : 'Следующий вопрос через ';
+      var upd = function () {
+        info.textContent = what + Math.max(0, Math.ceil((end - Date.now()) / 1000)) + ' с';
+      };
+      upd();
+      autoId = setInterval(upd, 250);
+      btn.textContent = 'Пауза';
+    } else {
+      stopAuto();
+      return;
+    }
+    info.hidden = false;
+    btn.hidden = false;
+  }
   function startTimer(ms) {
     stopTimer();
     timerEnd = Date.now() + ms;
@@ -107,6 +141,7 @@
     });
     markSeg('set-seconds', s.settings.seconds);
     markSeg('set-count', s.settings.count);
+    markSeg('set-auto', s.settings.auto);
     var info;
     if (s.questionsError) info = s.questionsError;
     else {
@@ -174,8 +209,10 @@
         ol.appendChild(li);
       });
       $('next').firstChild.textContent = s.reveal.isLast ? 'Итоги игры ' : 'Дальше ';
-    } else if (!st || st.phase !== 'question' || st.question.index !== q.index || !timerId) {
-      startTimer(q.remainingMs);
+      showAuto(s.reveal);
+    } else {
+      stopAuto();
+      if (!st || st.phase !== 'question' || st.question.index !== q.index || !timerId) startTimer(q.remainingMs);
     }
     show('v-question');
   }
@@ -200,6 +237,7 @@
   }
 
   function render(s) {
+    if (s.phase !== 'reveal') stopAuto();
     if (s.phase === 'lobby') renderLobby(s);
     else if (s.phase === 'question' || s.phase === 'reveal') renderQuestion(s);
     else if (s.phase === 'finished') renderFinal(s);
@@ -217,6 +255,7 @@
 
   $('start').onclick = function () { this.blur(); cmd('start'); };
   $('skip').onclick = function () { this.blur(); cmd('skip'); };
+  $('pause').onclick = function () { this.blur(); cmd('pause'); };
   $('next').onclick = function () { this.blur(); cmd('next'); };
   $('end').onclick = function () {
     this.blur();
@@ -228,7 +267,7 @@
   };
   $('download').onclick = download;
 
-  ['set-seconds', 'set-count'].forEach(function (id) {
+  ['set-seconds', 'set-count', 'set-auto'].forEach(function (id) {
     $(id).addEventListener('click', function (e) {
       var b = e.target.closest('button');
       if (!b || !st) return;
@@ -237,6 +276,7 @@
       cmd('settings', {
         seconds: id === 'set-seconds' ? v : st.settings.seconds,
         count: id === 'set-count' ? v : st.settings.count,
+        auto: id === 'set-auto' ? v : st.settings.auto,
       });
     });
   });

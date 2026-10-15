@@ -28,6 +28,7 @@ const MAX_PLAYERS = 300;
 const GRACE_MS = 300; // запас на задержку сети; такой ответ засчитывается как данный в последнюю секунду
 const ALLOWED_SECONDS = [15, 20, 30];
 const ALLOWED_COUNTS = [8, 12, 0]; // 0 = все вопросы из файла
+const ALLOWED_AUTO = [0, 10, 15, 20]; // через сколько секунд после итога вопроса начинать следующий; 0 = вручную
 const PROBE_MS = 2000; // сколько ждать ответа от старого подключения при повторном входе
 const HEARTBEAT_MS = 15000; // как часто проверять, что страницы на связи
 const PIN_MAX_FAILS = 8;
@@ -76,13 +77,15 @@ function shuffle(arr) {
 const game = {
   id: null,
   phase: 'lobby', // lobby | question | reveal | finished
-  settings: { seconds: 20, count: 12 },
+  settings: { seconds: 20, count: 12, auto: 15 },
   questions: [], // { text, options[4], correct, explanation }
   qIndex: -1,
   asked: 0, // сколько вопросов уже завершено
   qStartedAt: 0,
   qDeadline: 0,
-  timer: null,
+  timer: null, // таймер вопроса, а во время итога вопроса — таймер автоперехода
+  autoAt: 0, // когда сработает автопереход (0 — не запланирован)
+  autoPaused: false,
   joinUrl: '',
   qrSvg: '',
   savedAt: null,
@@ -200,6 +203,7 @@ function studentView(p) {
       score: p.score,
       rank: p.rank,
       players: players.size,
+      nextInMs: autoRemainingMs(),
     });
   } else if (game.phase === 'finished') {
     Object.assign(v, {
@@ -257,6 +261,8 @@ function hostView() {
       histogram,
       top: ranking().slice(0, 5).map((p) => ({ rank: p.rank, name: p.name, score: p.score })),
       isLast: game.qIndex + 1 >= game.questions.length,
+      autoMs: autoRemainingMs(),
+      autoPaused: game.autoPaused,
     };
   }
   if (game.phase === 'finished') {
@@ -323,6 +329,7 @@ function startGame() {
 
 function startQuestion(i) {
   clearTimeout(game.timer);
+  game.autoAt = 0;
   game.phase = 'question';
   game.qIndex = i;
   game.qStartedAt = Date.now();
@@ -336,8 +343,26 @@ function endQuestion() {
   clearTimeout(game.timer);
   game.phase = 'reveal';
   game.asked = game.qIndex + 1;
+  game.autoPaused = false;
   saveResults();
+  scheduleAuto();
   broadcastAll();
+}
+
+// Автопереход: после итога вопроса сам начинается следующий (после последнего — итоги игры).
+function scheduleAuto() {
+  clearTimeout(game.timer);
+  game.autoAt = 0;
+  const sec = game.settings.auto;
+  if (game.phase !== 'reveal' || !sec || game.autoPaused) return;
+  game.autoAt = Date.now() + sec * 1000;
+  game.timer = setTimeout(() => {
+    if (game.phase === 'reveal') nextQuestion();
+  }, sec * 1000);
+}
+
+function autoRemainingMs() {
+  return game.autoAt ? Math.max(0, game.autoAt - Date.now()) : null;
 }
 
 function nextQuestion() {
@@ -348,6 +373,7 @@ function nextQuestion() {
 function finishGame() {
   if (game.phase === 'question') endQuestion();
   clearTimeout(game.timer);
+  game.autoAt = 0;
   game.phase = 'finished';
   saveResults();
   broadcastAll();
@@ -355,6 +381,7 @@ function finishGame() {
 
 function newGame() {
   clearTimeout(game.timer);
+  game.autoAt = 0;
   for (const p of [...players.values()]) {
     if (!p.connected) removePlayer(p);
     p.score = 0;
@@ -608,10 +635,26 @@ function handleHostCommand(ws, msg) {
   if (ws !== hostWs) return send(ws, { t: 'hostReplaced' });
   switch (msg.t) {
     case 'settings':
-      if (game.phase !== 'lobby') return;
-      if (ALLOWED_SECONDS.includes(msg.seconds)) game.settings.seconds = msg.seconds;
-      if (ALLOWED_COUNTS.includes(msg.count)) game.settings.count = msg.count;
+      // Время и число вопросов меняются только в лобби, автопереход — в любой момент.
+      if (game.phase === 'lobby') {
+        if (ALLOWED_SECONDS.includes(msg.seconds)) game.settings.seconds = msg.seconds;
+        if (ALLOWED_COUNTS.includes(msg.count)) game.settings.count = msg.count;
+      }
+      if (ALLOWED_AUTO.includes(msg.auto) && msg.auto !== game.settings.auto) {
+        game.settings.auto = msg.auto;
+        if (game.phase === 'reveal') {
+          game.autoPaused = false;
+          scheduleAuto();
+          return broadcastAll();
+        }
+      }
       sendHostNow();
+      break;
+    case 'pause':
+      if (game.phase !== 'reveal' || !game.settings.auto) return;
+      game.autoPaused = !game.autoPaused;
+      scheduleAuto();
+      broadcastAll();
       break;
     case 'start':
       if (game.phase === 'lobby') startGame();
