@@ -49,6 +49,13 @@
         <ul id="names" class="names"></ul>
         <div class="settings card">
           <div class="setting">
+            <span>Режим</span>
+            <div class="seg" id="set-mode">
+              <button type="button" data-v="self">каждый в своём темпе</button>
+              <button type="button" data-v="live">все вместе</button>
+            </div>
+          </div>
+          <div class="setting">
             <span>Время на вопрос</span>
             <div class="seg" id="set-seconds">
               <button type="button" data-v="15">15 с</button>
@@ -64,7 +71,7 @@
               <button type="button" data-v="0">все</button>
             </div>
           </div>
-          <div class="setting">
+          <div class="setting" id="row-auto">
             <span>Следующий вопрос</span>
             <div class="seg" id="set-auto">
               <button type="button" data-v="0">вручную</button>
@@ -73,6 +80,7 @@
               <button type="button" data-v="20">20 с</button>
             </div>
           </div>
+          <p id="mode-info" class="muted small"></p>
           <p id="q-info" class="muted small"></p>
         </div>
         <p id="lobby-warn" class="warn small" hidden></p>
@@ -108,6 +116,22 @@
       <button id="skip" type="button">Пропустить таймер <kbd>Пробел</kbd></button>
       <button id="next" class="primary" type="button" hidden>Дальше <kbd>Пробел</kbd></button>
       <button id="end" class="danger" type="button">Завершить игру</button>
+    </div>
+  </section>
+
+  <!-- Игра «каждый в своём темпе» -->
+  <section id="v-self" class="view" hidden>
+    <div class="final-head">
+      <h2>Каждый отвечает в своём темпе</h2>
+      <div class="self-count"><span id="self-done">0</span> из <span id="self-total">0</span> закончили</div>
+    </div>
+    <p class="muted">Вопросы и ответы — на телефонах студентов. Когда все закончат, игра завершится сама.</p>
+    <table class="ranking">
+      <thead><tr><th>Место</th><th>Фамилия и имя</th><th>Вопрос</th><th>Баллы</th></tr></thead>
+      <tbody id="self-body"></tbody>
+    </table>
+    <div class="controls">
+      <button id="end-self" class="danger" type="button">Завершить игру</button>
     </div>
   </section>
 

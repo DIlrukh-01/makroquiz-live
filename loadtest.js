@@ -101,7 +101,7 @@ async function main() {
     host.send({ t: 'reset' });
     hs = await host.wait((m) => m.t === 'host' && m.phase === 'lobby');
   }
-  host.send({ t: 'settings', seconds: 15, count: 12, auto: 0 });
+  host.send({ t: 'settings', seconds: 15, count: 12, auto: 0, mode: 'live' });
 
   // 2. Студенты входят.
   const students = [];
@@ -133,7 +133,8 @@ async function main() {
   dup.close();
 
   hs = await host.wait((m) => m.t === 'host' && m.players.length === N, 10000, 0).catch(() => null);
-  check(hs && hs.players.length === N, `Ведущий видит ${N} участников в лобби`);
+  const lastHost = host.msgs.filter((m) => m.t === 'host').pop();
+  check(hs && hs.players.length === N, `Ведущий видит ${N} участников в лобби` + (hs ? '' : ` (видит ${lastHost ? lastHost.players.length : 0}, этап «${lastHost && lastHost.phase}»)`));
 
   // 3. Второй ведущий забирает управление, первый получает уведомление.
   const host2 = new Client('ведущий-2');
@@ -281,6 +282,81 @@ async function main() {
   const noPin = await fetch(BASE + '/api/results.csv');
   check(noPin.status === 403, 'CSV без PIN не отдаётся');
 
+  // 6. Вторая игра в режиме «каждый в своём темпе».
+  console.log('\nРежим «каждый в своём темпе»:');
+  let hm = H.mark();
+  H.send({ t: 'reset' });
+  await H.wait((m) => m.t === 'host' && m.phase === 'lobby', 10000, hm);
+  hm = H.mark();
+  H.send({ t: 'settings', seconds: 15, count: 12, mode: 'self' });
+  await H.wait((m) => m.t === 'host' && m.settings.mode === 'self', 10000, hm);
+  hm = H.mark();
+  const marks = students.map((s) => s.client.mark());
+  H.send({ t: 'start' });
+  const selfLate = students[N - 1];
+  const selfDropped = students[1];
+  const selfLat = [];
+  const tSelf = Date.now();
+  await Promise.all(students.map(async (s, si) => {
+    s.selfScore = 0;
+    s.selfSeen = new Set();
+    let mk = marks[si];
+    for (let i = 0; i < 12; i++) {
+      let st = await s.client.wait((m) => m.t === 'state' && m.phase === 'self' && m.step === 'question' && m.index === i, 30000, mk);
+      if (s.selfSeen.has(st.qid)) s.selfDup = true;
+      s.selfSeen.add(st.qid);
+      if (s === selfDropped && i === 5) {
+        // Обрыв связи посреди своего вопроса и вход по имени.
+        await new Promise((r) => { s.client.ws.once('close', r); s.client.close(); });
+        await sleep(300);
+        s.client = new Client(s.name);
+        await s.client.open();
+        s.client.send({ t: 'join', name: s.name });
+        st = await s.client.wait((m) => m.t === 'state' || m.t === 'joinError', 15000);
+        s.selfBack = st.phase === 'self' && st.step === 'question' && st.index === 5 && st.score === s.selfScore;
+      }
+      if (s === selfLate && i === 0) {
+        // Не отвечает: время вышло, затем пробует ответить поздно.
+        const fb = await s.client.wait((m) => m.t === 'state' && m.step === 'feedback' && m.index === 0, 25000, mk);
+        s.lateNoAnswer = fb.choice === null && fb.points === 0;
+        const m1 = s.client.mark();
+        s.client.send({ t: 'answer', q: st.qid, choice: 0 });
+        const n = await s.client.wait((m) => m.t === 'notice', 5000, m1).catch(() => null);
+        s.lateRejected = !!n;
+        mk = s.client.mark();
+        s.client.send({ t: 'nextQ' });
+        continue;
+      }
+      await sleep(rand(200, 1500));
+      const m0 = s.client.mark();
+      const sent = Date.now();
+      s.client.send({ t: 'answer', q: st.qid, choice: Math.floor(Math.random() * 4) });
+      const fb = await s.client.wait((m) => m.t === 'state' && m.step === 'feedback' && m.index === i, 10000, m0);
+      selfLat.push(fb._at - sent);
+      if (fb.isCorrect ? fb.points < 500 || fb.points > 1000 || fb.points % 10 : fb.points !== 0) s.selfBadPoints = true;
+      s.selfScore += fb.points;
+      if (fb.score !== s.selfScore) s.selfMismatch = true;
+      mk = s.client.mark();
+      if (i % 2 === 0) s.client.send({ t: 'nextQ' }); // половина жмёт «Дальше», остальные ждут 3 с
+    }
+    await s.client.wait((m) => m.t === 'state' && m.phase === 'self' && m.step === 'done', 15000, mk);
+  }));
+  const selfFin = await H.wait((m) => m.t === 'host' && m.phase === 'finished', 15000, hm).catch(() => null);
+  check(students.every((s) => s.selfSeen.size === 12 && !s.selfDup), `Каждый из ${N} прошёл 12 разных вопросов за ${((Date.now() - tSelf) / 1000).toFixed(0)} с`);
+  const orders = new Set(students.map((s) => [...s.selfSeen].join(',')));
+  check(orders.size > N / 2, `Порядок вопросов у студентов разный (${orders.size} вариантов)`);
+  check(selfLate.lateNoAnswer && selfLate.lateRejected, 'Без ответа по таймеру — 0 баллов, поздний ответ не принят');
+  check(selfDropped.selfBack, 'Студент потерял связь и вернулся по имени в свой вопрос с прежними баллами');
+  check(students.every((s) => !s.selfBadPoints && !s.selfMismatch), 'Баллы в своём темпе считаются верно');
+  check(!!selfFin, 'Игра завершилась сама, когда все ответили');
+  if (selfFin) {
+    const byN = new Map(selfFin.ranking.map((r) => [r.name, r]));
+    check(students.every((s) => byN.get(s.name) && byN.get(s.name).score === s.selfScore), 'Итоговый рейтинг совпадает с баллами студентов');
+  }
+  const csv2 = (await (await fetch(BASE + '/api/results.csv', { headers: { 'X-Host-Pin': PIN } })).text()).replace(/^﻿/, '').trim().split(/\r\n/);
+  check(csv2.length === N + 1 && csv2[0].split(';').length === 16, `CSV в своём темпе: ${csv2.length - 1} строк, ${csv2[0].split(';').length} колонок`);
+  latencies.push(...selfLat);
+
   latencies.sort((a, b) => a - b);
   const p = (x) => latencies[Math.min(latencies.length - 1, Math.floor(latencies.length * x))];
   console.log(`\nОтветов отправлено: ${latencies.length}`);
@@ -291,7 +367,7 @@ async function main() {
   await sleep(1500);
   H.send({ t: 'reset' });
   await sleep(300);
-  H.send({ t: 'settings', seconds: 20, count: 12, auto: 15 });
+  H.send({ t: 'settings', seconds: 20, count: 12, auto: 15, mode: 'self' });
   await sleep(300);
   H.close();
   finish(t0);

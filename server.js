@@ -29,6 +29,8 @@ const GRACE_MS = 300; // запас на задержку сети; такой �
 const ALLOWED_SECONDS = [15, 20, 30];
 const ALLOWED_COUNTS = [8, 12, 0]; // 0 = все вопросы из файла
 const ALLOWED_AUTO = [0, 10, 15, 20]; // через сколько секунд после итога вопроса начинать следующий; 0 = вручную
+const ALLOWED_MODES = ['self', 'live']; // self — каждый в своём темпе, live — все вместе по экрану ведущего
+const FEEDBACK_MS = 3000; // в режиме «в своём темпе»: сколько показывать «верно/неверно» перед следующим вопросом
 const PROBE_MS = 2000; // сколько ждать ответа от старого подключения при повторном входе
 const HEARTBEAT_MS = 15000; // как часто проверять, что страницы на связи
 const PIN_MAX_FAILS = 8;
@@ -76,8 +78,8 @@ function shuffle(arr) {
 
 const game = {
   id: null,
-  phase: 'lobby', // lobby | question | reveal | finished
-  settings: { seconds: 20, count: 12, auto: 15 },
+  phase: 'lobby', // lobby | question | reveal | self | finished  (self — идёт игра «в своём темпе»)
+  settings: { seconds: 20, count: 12, auto: 15, mode: 'self' },
   questions: [], // { text, options[4], correct, explanation }
   qIndex: -1,
   asked: 0, // сколько вопросов уже завершено
@@ -108,6 +110,14 @@ function newPlayer(name, key) {
     score: 0,
     rank: 0,
     answers: [], // по номеру вопроса: { choice, correct, points, ms }
+    // Режим «в своём темпе»: свой порядок вопросов, позиция, шаг и таймер у каждого студента
+    order: null,
+    pos: 0,
+    step: null, // question | feedback | pending (ждёт возвращения связи) | done
+    qStartedAt: 0,
+    qDeadline: 0,
+    feedbackUntil: 0,
+    timer: null,
   };
   players.set(key, p);
   playersById.set(p.id, p);
@@ -115,8 +125,16 @@ function newPlayer(name, key) {
 }
 
 function removePlayer(p) {
+  clearTimeout(p.timer);
   players.delete(p.key);
   playersById.delete(p.id);
+}
+
+function resetSelf(p) {
+  clearTimeout(p.timer);
+  p.order = null;
+  p.pos = 0;
+  p.step = null;
 }
 
 function correctCount(p) {
@@ -205,6 +223,35 @@ function studentView(p) {
       players: players.size,
       nextInMs: autoRemainingMs(),
     });
+  } else if (game.phase === 'self') {
+    const total = game.questions.length;
+    Object.assign(v, { step: p.step, index: Math.min(p.pos, total), total, seconds: game.settings.seconds, score: p.score });
+    const qid = p.order ? p.order[p.pos] : null;
+    const sq = game.questions[qid];
+    if (p.step === 'question') {
+      Object.assign(v, {
+        qid,
+        text: sq.text,
+        options: sq.options,
+        remainingMs: Math.max(0, p.qDeadline - Date.now()),
+      });
+    } else if (p.step === 'feedback') {
+      const sa = p.answers[qid];
+      Object.assign(v, {
+        qid,
+        text: sq.text,
+        options: sq.options,
+        correct: sq.correct,
+        explanation: sq.explanation,
+        choice: sa ? sa.choice : null,
+        isCorrect: !!(sa && sa.correct),
+        points: sa ? sa.points : 0,
+        nextInMs: Math.max(0, p.feedbackUntil - Date.now()),
+        isLast: p.pos + 1 >= total,
+      });
+    } else if (p.step === 'done') {
+      v.correctCount = correctCount(p);
+    }
   } else if (game.phase === 'finished') {
     Object.assign(v, {
       score: p.score,
@@ -265,6 +312,21 @@ function hostView() {
       autoPaused: game.autoPaused,
     };
   }
+  if (game.phase === 'self') {
+    const total = game.questions.length;
+    v.self = {
+      total,
+      done: list.filter((p) => p.step === 'done').length,
+      ranking: ranking().map((p) => ({
+        rank: p.rank,
+        name: p.name,
+        score: p.score,
+        progress: Math.min(p.step === 'done' ? total : p.pos, total),
+        done: p.step === 'done',
+        connected: p.connected,
+      })),
+    };
+  }
   if (game.phase === 'finished') {
     v.asked = game.asked;
     v.ranking = ranking().map((p) => ({
@@ -323,8 +385,97 @@ function startGame() {
   for (const p of players.values()) {
     p.score = 0;
     p.answers = [];
+    resetSelf(p);
+  }
+  if (game.settings.mode === 'self') {
+    game.phase = 'self';
+    game.qIndex = -1;
+    game.asked = game.questions.length; // в этом режиме все вопросы «заданы» сразу
+    for (const p of players.values()) beginSelf(p);
+    broadcastAll();
+    return;
   }
   startQuestion(0);
+}
+
+// ---------- Режим «каждый в своём темпе» ----------
+
+function calcPoints(left, total) {
+  return Math.round((500 + (500 * left) / total) / 10) * 10;
+}
+
+// Свой порядок вопросов (чтобы быстрые не подсказывали соседям) и старт первого вопроса.
+function beginSelf(p) {
+  p.order = shuffle(game.questions.map((q, i) => i));
+  p.pos = 0;
+  if (p.connected) startPlayerQuestion(p);
+  else p.step = 'pending';
+}
+
+function startPlayerQuestion(p) {
+  clearTimeout(p.timer);
+  const sec = game.settings.seconds;
+  p.step = 'question';
+  p.qStartedAt = Date.now();
+  p.qDeadline = p.qStartedAt + sec * 1000;
+  p.timer = setTimeout(() => {
+    if (game.phase === 'self' && p.step === 'question') showFeedback(p); // время вышло без ответа
+  }, sec * 1000 + GRACE_MS);
+  send(p.ws, studentView(p));
+}
+
+function showFeedback(p) {
+  clearTimeout(p.timer);
+  p.step = 'feedback';
+  p.feedbackUntil = Date.now() + FEEDBACK_MS;
+  p.timer = setTimeout(() => advancePlayer(p), FEEDBACK_MS);
+  send(p.ws, studentView(p));
+  scheduleHost();
+}
+
+function advancePlayer(p) {
+  if (game.phase !== 'self' || p.step !== 'feedback') return;
+  clearTimeout(p.timer);
+  p.pos++;
+  if (p.pos >= game.questions.length) {
+    p.step = 'done';
+    saveResults();
+    send(p.ws, studentView(p));
+    scheduleHost();
+    checkSelfFinished();
+    return;
+  }
+  // Если связь пропала, следующий вопрос начнётся, когда студент вернётся.
+  if (p.connected) startPlayerQuestion(p);
+  else p.step = 'pending';
+  scheduleHost();
+}
+
+// Когда все ответили на все вопросы, игра заканчивается сама.
+function checkSelfFinished() {
+  if (game.phase !== 'self' || !players.size) return;
+  for (const p of players.values()) if (p.step !== 'done') return;
+  finishGame();
+}
+
+function handleSelfAnswer(p, msg) {
+  const ws = p.ws;
+  const qid = p.order ? p.order[p.pos] : -1;
+  const late = () => send(ws, { t: 'notice', msg: 'Время на этот вопрос вышло, ответ не засчитан.' });
+  if (msg.q !== qid) return late();
+  if (p.answers[qid]) return send(ws, { t: 'notice', msg: 'Ответ уже принят, изменить его нельзя.' });
+  if (p.step !== 'question') return late();
+  const choice = msg.choice;
+  if (!Number.isInteger(choice) || choice < 0 || choice > 3) return;
+  const now = Date.now();
+  if (now > p.qDeadline + GRACE_MS) return late();
+  const total = game.settings.seconds;
+  const left = Math.min(total, Math.max(0, (p.qDeadline - now) / 1000));
+  const correct = choice === game.questions[qid].correct;
+  const points = correct ? calcPoints(left, total) : 0;
+  p.answers[qid] = { choice, correct, points, ms: now - p.qStartedAt };
+  p.score += points;
+  showFeedback(p);
 }
 
 function startQuestion(i) {
@@ -374,6 +525,7 @@ function finishGame() {
   if (game.phase === 'question') endQuestion();
   clearTimeout(game.timer);
   game.autoAt = 0;
+  for (const p of players.values()) clearTimeout(p.timer);
   game.phase = 'finished';
   saveResults();
   broadcastAll();
@@ -386,6 +538,7 @@ function newGame() {
     if (!p.connected) removePlayer(p);
     p.score = 0;
     p.answers = [];
+    resetSelf(p);
   }
   game.phase = 'lobby';
   game.questions = [];
@@ -397,6 +550,7 @@ function newGame() {
 
 function handleAnswer(p, msg) {
   const ws = p.ws;
+  if (game.phase === 'self') return handleSelfAnswer(p, msg);
   if (game.phase !== 'question' || msg.q !== game.qIndex) {
     send(ws, { t: 'notice', msg: 'Время на этот вопрос вышло, ответ не засчитан.' });
     return;
@@ -416,7 +570,7 @@ function handleAnswer(p, msg) {
   const left = Math.min(total, Math.max(0, (game.qDeadline - now) / 1000));
   const q = game.questions[game.qIndex];
   const correct = choice === q.correct;
-  const points = correct ? Math.round((500 + (500 * left) / total) / 10) * 10 : 0;
+  const points = correct ? calcPoints(left, total) : 0;
   p.answers[game.qIndex] = { choice, correct, points, ms: now - game.qStartedAt };
   p.score += points;
   send(ws, studentView(p));
@@ -610,7 +764,18 @@ function attachPlayer(ws, p) {
   p.connected = true;
   ranking();
   send(ws, { t: 'welcome', name: p.name, token: p.token });
-  send(ws, studentView(p));
+  if (game.phase === 'self') {
+    // Опоздавший получает свой набор вопросов; вернувшийся после обрыва продолжает с того же места.
+    if (!p.order) {
+      p.order = shuffle(game.questions.map((q, i) => i));
+      p.pos = 0;
+      p.step = 'pending';
+    }
+    if (p.step === 'pending') startPlayerQuestion(p);
+    else send(ws, studentView(p));
+  } else {
+    send(ws, studentView(p));
+  }
   scheduleHost();
 }
 
@@ -639,6 +804,7 @@ function handleHostCommand(ws, msg) {
       if (game.phase === 'lobby') {
         if (ALLOWED_SECONDS.includes(msg.seconds)) game.settings.seconds = msg.seconds;
         if (ALLOWED_COUNTS.includes(msg.count)) game.settings.count = msg.count;
+        if (ALLOWED_MODES.includes(msg.mode)) game.settings.mode = msg.mode;
       }
       if (ALLOWED_AUTO.includes(msg.auto) && msg.auto !== game.settings.auto) {
         game.settings.auto = msg.auto;
@@ -667,7 +833,7 @@ function handleHostCommand(ws, msg) {
       if (game.phase === 'question') endQuestion();
       break;
     case 'end':
-      if (game.phase === 'question' || game.phase === 'reveal') finishGame();
+      if (game.phase === 'question' || game.phase === 'reveal' || game.phase === 'self') finishGame();
       break;
     case 'reset':
       if (game.phase === 'finished' || game.phase === 'lobby') newGame();
@@ -682,6 +848,7 @@ function handleHostCommand(ws, msg) {
       }
       if (game.phase === 'question' && players.size && answeredCount() >= connectedCount()) endQuestion();
       else broadcastAll();
+      checkSelfFinished();
       break;
     }
   }
@@ -748,6 +915,12 @@ wss.on('connection', (ws, req) => {
     }
     if (msg.t === 'hostAuth') return handleHostAuth(ws, msg);
     if (msg.t === 'hb') return; // ответ страницы на проверку связи
+    if (msg.t === 'nextQ') {
+      // «Дальше» на телефоне в режиме «в своём темпе»
+      const p = ws.player;
+      if (p && p.ws === ws && game.phase === 'self' && p.step === 'feedback') advancePlayer(p);
+      return;
+    }
     if (msg.t === 'ping') return send(ws, { t: 'pong' });
     if (ws.isHost || ws === hostWs) return handleHostCommand(ws, msg);
     send(ws, { t: 'hostReplaced' });

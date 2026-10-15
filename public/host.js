@@ -142,6 +142,12 @@
     markSeg('set-seconds', s.settings.seconds);
     markSeg('set-count', s.settings.count);
     markSeg('set-auto', s.settings.auto);
+    markSeg('set-mode', s.settings.mode);
+    var selfMode = s.settings.mode === 'self';
+    $('row-auto').hidden = selfMode;
+    $('mode-info').textContent = selfMode
+      ? 'Каждый студент сразу после ответа получает свой следующий вопрос. На экране — прогресс и рейтинг.'
+      : 'Все отвечают на один вопрос одновременно, вопросы и итоги показываются на этом экране.';
     var info;
     if (s.questionsError) info = s.questionsError;
     else {
@@ -158,7 +164,7 @@
 
   function markSeg(id, value) {
     var b = $(id).querySelectorAll('button');
-    for (var i = 0; i < b.length; i++) b[i].classList.toggle('on', Number(b[i].getAttribute('data-v')) === value);
+    for (var i = 0; i < b.length; i++) b[i].classList.toggle('on', b[i].getAttribute('data-v') === String(value));
   }
 
   function renderQuestion(s) {
@@ -236,9 +242,32 @@
     show('v-final');
   }
 
+  function renderSelf(s) {
+    stopTimer();
+    var d = s.self;
+    $('top-info').textContent = 'Игра идёт · вопросов: ' + d.total;
+    $('self-done').textContent = d.done;
+    $('self-total').textContent = d.ranking.length;
+    var tb = $('self-body');
+    tb.textContent = '';
+    d.ranking.forEach(function (p) {
+      var tr = el('tr', p.connected || p.done ? '' : 'off');
+      tr.appendChild(el('td', '', String(p.rank)));
+      tr.appendChild(el('td', '', p.name));
+      var td = el('td');
+      if (p.done) td.appendChild(el('span', 'done', '✓ все ' + d.total));
+      else td.textContent = Math.min(p.progress + 1, d.total) + ' из ' + d.total;
+      tr.appendChild(td);
+      tr.appendChild(el('td', '', String(p.score)));
+      tb.appendChild(tr);
+    });
+    show('v-self');
+  }
+
   function render(s) {
     if (s.phase !== 'reveal') stopAuto();
-    if (s.phase === 'lobby') renderLobby(s);
+    if (s.phase === 'self') renderSelf(s);
+    else if (s.phase === 'lobby') renderLobby(s);
     else if (s.phase === 'question' || s.phase === 'reveal') renderQuestion(s);
     else if (s.phase === 'finished') renderFinal(s);
     st = s;
@@ -261,22 +290,28 @@
     this.blur();
     if (confirm('Завершить игру сейчас? Результаты сохранятся по уже заданным вопросам.')) cmd('end');
   };
+  $('end-self').onclick = function () {
+    this.blur();
+    if (confirm('Завершить игру сейчас? Неотвеченные вопросы будут засчитаны как «нет ответа».')) cmd('end');
+  };
   $('reset').onclick = function () {
     this.blur();
     if (confirm('Начать новую игру? Текущие результаты пропадут с экрана. Вы их скачали?')) cmd('reset');
   };
   $('download').onclick = download;
 
-  ['set-seconds', 'set-count', 'set-auto'].forEach(function (id) {
+  ['set-seconds', 'set-count', 'set-auto', 'set-mode'].forEach(function (id) {
     $(id).addEventListener('click', function (e) {
       var b = e.target.closest('button');
       if (!b || !st) return;
       b.blur();
-      var v = Number(b.getAttribute('data-v'));
+      var raw = b.getAttribute('data-v');
+      var v = Number(raw);
       cmd('settings', {
         seconds: id === 'set-seconds' ? v : st.settings.seconds,
         count: id === 'set-count' ? v : st.settings.count,
         auto: id === 'set-auto' ? v : st.settings.auto,
+        mode: id === 'set-mode' ? raw : st.settings.mode,
       });
     });
   });

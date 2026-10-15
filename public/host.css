@@ -149,6 +149,12 @@ button.danger { color: var(--bad); border-color: var(--bad); background: transpa
 .auto-info { margin-right: auto; color: var(--muted); font-weight: 600; font-variant-numeric: tabular-nums; }
 .controls button { font-size: 1em; }
 
+/* В своём темпе */
+.self-count { font-size: 1.6em; font-weight: 700; }
+.self-count span:first-child { color: var(--accent); }
+.ranking tr.off td { opacity: 0.5; }
+.ranking td .done { color: var(--ok); font-weight: 700; }
+
 /* Итоги */
 .final-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .final-head h2 { font-size: 1.8em; margin: 0; }

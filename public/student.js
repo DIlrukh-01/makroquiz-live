@@ -82,7 +82,8 @@
     }
     if (left <= 0) {
       stopTimer();
-      if (current && current.phase === 'question' && !current.answered) {
+      var onQuestion = current && (current.phase === 'question' || (current.phase === 'self' && current.step === 'question'));
+      if (onQuestion && !current.answered) {
         disableOptions();
         $('q-status').textContent = 'Время вышло';
       }
@@ -104,7 +105,21 @@
       show('s-wait');
       return;
     }
-    if (st.phase === 'question') {
+    var self = st.phase === 'self'; // режим «каждый в своём темпе»
+    if (self && st.step === 'done') {
+      stopTimer();
+      $('d-score').textContent = st.score + ' баллов';
+      $('d-correct').textContent = 'Верных ответов: ' + st.correctCount + ' из ' + st.total;
+      show('s-done');
+      return;
+    }
+    if (self && st.step !== 'question' && st.step !== 'feedback') {
+      stopTimer();
+      show('s-wait');
+      return;
+    }
+    if (st.phase === 'question' || (self && st.step === 'question')) {
+      var qKey = self ? st.qid : st.index; // номер вопроса, который сервер ждёт в ответе
       var num = 'Вопрос ' + (st.index + 1) + ' из ' + st.total;
       if (st.answered) {
         $('a-num').textContent = num;
@@ -129,7 +144,7 @@
           s.textContent = text;
           b.appendChild(l);
           b.appendChild(s);
-          b.onclick = function () { answer(st.index, i); };
+          b.onclick = function () { answer(qKey, i); };
           box.appendChild(b);
         });
         show('s-question');
@@ -137,7 +152,7 @@
       startTimer(st.remainingMs);
       return;
     }
-    if (st.phase === 'reveal') {
+    if (st.phase === 'reveal' || self) {
       stopTimer();
       var v = $('r-verdict');
       if (st.choice === null) {
@@ -155,14 +170,18 @@
       }
       $('r-correct').textContent = LETTERS[st.correct] + '. ' + st.options[st.correct];
       $('r-expl').textContent = st.explanation || '';
-      $('r-score').textContent = 'Всего: ' + st.score + ' баллов · место ' + st.rank + ' из ' + st.players;
+      $('r-score').textContent = self
+        ? 'Всего: ' + st.score + ' баллов'
+        : 'Всего: ' + st.score + ' баллов · место ' + st.rank + ' из ' + st.players;
+      $('r-go').hidden = !self;
+      $('r-go').disabled = false;
       var isLast = st.index + 1 >= st.total;
       if (typeof st.nextInMs === 'number') {
-        // Отсчёт до автоперехода (идёт тем же таймером, что и вопрос)
+        // Отсчёт до следующего вопроса (идёт тем же таймером, что и вопрос)
         timerEnd = Date.now() + st.nextInMs;
         var upd = function () {
           var left = Math.max(0, Math.ceil((timerEnd - Date.now()) / 1000));
-          $('r-next').textContent = (isLast ? 'Итоги игры через ' : 'Следующий вопрос через ') + left + ' с';
+          $('r-next').textContent = (isLast ? (self ? 'Завершаем через ' : 'Итоги игры через ') : 'Следующий вопрос через ') + left + ' с';
         };
         upd();
         timerId = setInterval(upd, 250);
@@ -218,7 +237,7 @@
         break;
       case 'notice':
         toast(msg.msg);
-        if (current && current.phase === 'question') $('q-status').textContent = msg.msg;
+        if (current && (current.phase === 'question' || current.step === 'question')) $('q-status').textContent = msg.msg;
         break;
       case 'kicked':
         store.del('mq_token');
@@ -277,6 +296,12 @@
     $('join-btn').disabled = true;
     if (ws && ws.readyState === 1) sendJoin();
     else $('join-error').textContent = 'Подключаемся к серверу…';
+  });
+
+  $('r-go').addEventListener('click', function () {
+    if (!ws || ws.readyState !== 1) return;
+    this.disabled = true;
+    ws.send('{"t":"nextQ"}');
   });
 
   $('change-name').addEventListener('click', function () {
